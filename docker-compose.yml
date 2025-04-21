@@ -1,0 +1,52 @@
+services:
+  traefik:
+    image: traefik:v3.3
+    container_name: traefik
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+      - "9000:9000"  # Solo accesible desde tu red local
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - ./traefik.yml:/traefik.yml:ro
+      - ./dynamic:/dynamic:ro
+      - ./acme.json:/acme.json
+      - /var/log/traefik/access.log:/var/log/traefik/access.log # Necesario para Crowdsec
+    networks:
+      - web
+
+  authelia:
+    image: authelia/authelia:latest
+    container_name: authelia
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.authelia.rule=Host(`auth.tudominio.com`)"
+      - "traefik.http.routers.authelia.entrypoints=websecure"
+      - "traefik.http.routers.authelia.tls.certresolver=letsencrypt"
+      - "traefik.http.services.authelia.loadbalancer.server.port=9091" 
+    volumes:
+      - ./authelia:/config
+    environment:
+      - TZ=Europe/Madrid
+    networks:
+      - web
+
+  whoami:
+    image: traefik/whoami
+    container_name: whoami
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.whoami.rule=Host(`whoami.tudominio.com`)"
+      - "traefik.http.routers.whoami.entrypoints=websecure"
+      - "traefik.http.routers.whoami.tls.certresolver=letsencrypt"
+      - "traefik.http.routers.whoami.middlewares=authelia-auth@docker"
+      - "traefik.http.middlewares.authelia-auth.forwardauth.address=http://authelia:9091/api/verify?rd=https://auth.tudominio.com"
+      - "traefik.http.middlewares.authelia-auth.forwardauth.trustForwardHeader=true"
+      - "traefik.http.middlewares.authelia-auth.forwardauth.authResponseHeaders=Remote-User,Remote-Groups"
+    networks:
+      - web
+
+networks:
+  web:
+    external: true
